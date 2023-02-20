@@ -1,4 +1,6 @@
 use crate::events::*;
+use crate::projectors::total_authorized_projector::TotalAuthorizedProjector;
+use crate::projectors::total_collected_projector::TotalCollectedProjector;
 use crate::projectors::total_ordered_projector::TotalOrderedProjector;
 use crate::projectors::Projector;
 use crate::reconciliation_engine::ReconciliationEngine;
@@ -18,7 +20,11 @@ pub struct EventHandler<'a> {
 impl<'a> EventHandler<'a> {
     pub fn new(conn: &'a sqlite::Connection) -> Self {
         Self {
-            projectors: vec![Box::new(TotalOrderedProjector::new(conn))],
+            projectors: vec![
+                Box::new(TotalOrderedProjector::new(conn)),
+                Box::new(TotalAuthorizedProjector::new(conn)),
+                Box::new(TotalCollectedProjector::new(conn)),
+            ],
             reconciliation_engine: ReconciliationEngine::new(conn),
         }
     }

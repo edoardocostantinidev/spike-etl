@@ -10,13 +10,14 @@ mod tests {
     use crate::event_handler::*;
     use crate::events::*;
     use std::str::FromStr;
-    use std::sync::Mutex;
 
     fn reset_db(connection: &Connection) {
         connection
             .execute(
                 r"
         DROP TABLE IF EXISTS total_ordered;
+        DROP TABLE IF EXISTS total_authorized;
+        DROP TABLE IF EXISTS total_collected;
         DROP TABLE IF EXISTS bank_transactions;
         DROP TABLE IF EXISTS payment_authorizations;
         DROP TABLE IF EXISTS payment_collections;
@@ -27,11 +28,24 @@ mod tests {
             amount float,
             occurred_on text
         );
+
+        CREATE TABLE total_authorized (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount float,
+            occurred_on text
+        );
+
+        CREATE TABLE total_collected (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount float,
+            occurred_on text
+        );
         
         CREATE TABLE bank_transactions (
             transaction_id text PRIMARY KEY,
             amount float,
-            occurred_on text
+            occurred_on text,
+            reconciled bool
         );
 
         CREATE TABLE payment_authorizations (
@@ -90,19 +104,12 @@ mod tests {
             }),
         ];
 
-        //push to event handler
         let event_handler = EventHandler::new(&conn);
         let handler_result = events
             .into_iter()
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
-
-        conn.prepare(r"SELECT * from total_ordered")
-            .unwrap()
-            .into_iter()
-            .for_each(|d| {
-                dbg!(d.unwrap());
-            });
+        assert!(handler_result.is_ok());
 
         let mut s = conn
             .prepare(r"SELECT SUM(amount) from total_ordered")
@@ -110,8 +117,33 @@ mod tests {
         let _ = s.next();
         let actual_total_ordered: f64 = s.read(0).unwrap();
 
-        //assert that we project correctly
-        assert!(handler_result.is_ok());
-        assert_eq!(actual_total_ordered, 100.0);
+        assert_eq!(
+            actual_total_ordered, 100.0,
+            "expecting the sum of all ordered events to be 100"
+        );
+
+        let mut s = conn
+            .prepare(r"SELECT SUM(amount) from total_authorized")
+            .unwrap();
+        let _ = s.next();
+        let actual_total_authorized: f64 = s.read(0).unwrap();
+
+        assert_eq!(
+            actual_total_authorized, 100.0,
+            "expecting the sum of all authorized events to be 100"
+        );
+
+        let mut s = conn
+            .prepare(r"SELECT SUM(amount) from total_collected")
+            .unwrap();
+        let _ = s.next();
+        let actual_total_collected: f64 = s.read(0).unwrap();
+
+        assert_eq!(
+            actual_total_collected, 100.0,
+            "expecting the sum of all collected events to be 100"
+        );
+
+        //assert on view outputs
     }
 }
