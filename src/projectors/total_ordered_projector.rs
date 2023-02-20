@@ -1,42 +1,29 @@
-use sqlite::Value;
-
 use crate::events::Event;
 use crate::events::ProductOrderedPayload;
 use crate::projectors::Projector;
 
-pub struct TotalOrderedProjector<'a> {
-    connection: &'a sqlite::Connection,
-}
+pub struct TotalOrderedProjector {}
 
-impl<'a> TotalOrderedProjector<'a> {
-    pub fn new(connection: &'a sqlite::Connection) -> Self {
-        Self { connection }
+impl TotalOrderedProjector {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl<'a> Projector for TotalOrderedProjector<'a> {
+impl Projector for TotalOrderedProjector {
     fn project(&self, event: Event) -> Result<(), String> {
         match event {
             Event::ProductOrdered(ProductOrderedPayload {
                 amount,
                 occurred_on,
                 ..
-            }) => {
-                let mut statement = self
-                .connection
-                .prepare(
-                    r"INSERT INTO total_ordered (amount, occurred_on) VALUES(:amount,:occurred_on)",
+            }) => crate::pool::Pool::get_client()
+                .execute(
+                    r"INSERT INTO total_ordered (amount, occurred_on) VALUES($1,$2)",
+                    &[&amount, &occurred_on.to_string()],
                 )
-                .unwrap();
-                statement
-                    .bind::<&[(_, Value)]>(&[
-                        (":amount", amount.into()),
-                        (":occurred_on", occurred_on.to_string().into()),
-                    ])
-                    .map_err(|e| e.to_string())?;
-
-                statement.next().map_err(|e| e.to_string()).map(|_| ())
-            }
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
             _ => Ok(()),
         }
     }

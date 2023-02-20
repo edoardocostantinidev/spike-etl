@@ -1,177 +1,156 @@
-use sqlite::{Connection, State, Value};
+use postgres::Client;
 
 use crate::events::{
     BankTransactionIssuedPayload, Event, PaymentAuthorizedPayload, PaymentCollectedPayload,
     ProductOrderedPayload,
 };
 
-pub struct ReconciliationEngine<'a> {
-    pub connection: &'a sqlite::Connection,
-}
+pub struct ReconciliationEngine {}
 
-impl<'a> ReconciliationEngine<'a> {
-    pub fn new(connection: &'a sqlite::Connection) -> Self {
-        Self { connection }
+impl ReconciliationEngine {
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub fn reconcile(&self, event: Event) -> Result<(), String> {
-        let mut statement = match event {
+        let client: &mut Client = &mut crate::pool::Pool::get_client();
+        let result = match event {
             Event::BankTransactionIssued(payload) => {
-                save_bank_transaction_issued(self.connection, payload.clone())?;
+                save_bank_transaction_issued(client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
-                WHERE bt.transaction_id = :id
+                WHERE bt.transaction_id = $1
                 AND bt.transaction_id = pc.transaction_id
                 AND pc.payment_id = pa.payment_id
                 AND pa.order_id = po.order_id";
-                let mut statement = self.connection.prepare(query).unwrap();
-                statement
-                    .bind::<(_, Value)>((":id", payload.transaction_id.into()))
-                    .unwrap();
-                statement
+                client.query(query, &[&payload.transaction_id])
             }
             Event::PaymentAuthorized(payload) => {
-                save_payment_authorized(self.connection, payload.clone())?;
+                save_payment_authorized(client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
-                WHERE pa.payment_id = :id
+                WHERE pa.payment_id = $1
                 AND bt.transaction_id = pc.transaction_id
                 AND pc.payment_id = pa.payment_id
                 AND pa.order_id = po.order_id";
-                let mut statement = self.connection.prepare(query).unwrap();
-                statement
-                    .bind::<(_, Value)>((":id", payload.payment_id.into()))
-                    .unwrap();
-                statement
+                client.query(query, &[&payload.payment_id])
             }
             Event::PaymentCollected(payload) => {
-                save_payment_collected(self.connection, payload.clone())?;
+                save_payment_collected(client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
-                WHERE pc.payment_id = :id
+                WHERE pc.payment_id = $1
                 AND bt.transaction_id = pc.transaction_id
                 AND pc.payment_id = pa.payment_id
                 AND pa.order_id = po.order_id";
-                let mut statement = self.connection.prepare(query).unwrap();
-                statement
-                    .bind::<(_, Value)>((":id", payload.payment_id.into()))
-                    .unwrap();
-                statement
+                client.query(query, &[&payload.payment_id])
             }
             Event::ProductOrdered(payload) => {
-                save_product_ordered(self.connection, payload.clone())?;
+                save_product_ordered(client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
-                WHERE po.order_id = :id
+                WHERE po.order_id = $1
                 AND bt.transaction_id = pc.transaction_id
                 AND pc.payment_id = pa.payment_id
                 AND pa.order_id = po.order_id";
-                let mut statement = self.connection.prepare(query).unwrap();
-                statement
-                    .bind::<(_, Value)>((":id", payload.order_id.into()))
-                    .unwrap();
-                statement
+                client.query(query, &[&payload.order_id])
             }
         };
 
-        if let Ok(State::Row) = statement.next() {
-            let (t_id, o_id, _p_id): (String, String, String) = (
-                statement.read::<String, usize>(0).unwrap().into(),
-                statement.read::<String, usize>(1).unwrap().into(),
-                statement.read::<String, usize>(2).unwrap().into(),
-            );
+        if let Some(x) = result.unwrap().get(0) {
+            let (t_id, o_id, _p_id): (String, String, String) = (x.get(0), x.get(1), x.get(2));
             //if amounts concile
-            let mut statement = self
-                .connection
-                .prepare(r"UPDATE bank_transactions SET reconciled = 1 WHERE transaction_id = :id")
-                .unwrap();
-            statement
-                .bind::<(_, Value)>((":id", t_id.into()))
-                .map_err(|e| e.message.unwrap_or_default())?;
-            statement
-                .next()
-                .map_err(|e| e.message.unwrap_or_default())?;
-
-            let mut statement = self
-                .connection
-                .prepare(r"UPDATE product_orders SET reconciled = 1 WHERE order_id = :id")
-                .unwrap();
-            statement
-                .bind::<(_, Value)>((":id", o_id.into()))
-                .map_err(|e| e.message.unwrap_or_default())?;
-            statement
-                .next()
-                .map_err(|e| e.message.unwrap_or_default())?;
+            client
+                .execute(
+                    r"UPDATE bank_transactions SET reconciled = 1 WHERE transaction_id = $1",
+                    &[&t_id],
+                )
+                .map_err(|e| e.to_string())?;
+            client
+                .execute(
+                    r"UPDATE product_orders SET reconciled = 1 WHERE order_id = $1",
+                    &[&o_id],
+                )
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
 }
 
 fn save_bank_transaction_issued(
-    conn: &Connection,
+    client: &mut Client,
     payload: BankTransactionIssuedPayload,
 ) -> Result<(), String> {
-    let mut s = conn.prepare(r"INSERT INTO bank_transactions (transaction_id, amount,occurred_on) VALUES(:id, :amount, :occurred_on)")
-    .unwrap();
-    s.bind::<&[(_, Value)]>(&[
-        (":id", payload.transaction_id.into()),
-        (":amount", payload.amount.into()),
-        (":occurred_on", payload.occurred_on.to_string().into()),
-    ])
-    .map_err(|e| e.message.unwrap_or_default())?;
-    s.next().map_err(|e| e.to_string()).map(|_| ())
+    client
+        .execute(
+            r"INSERT INTO bank_transactions (transaction_id, amount,occurred_on) VALUES($1,$2,$3)",
+            &[
+                &payload.transaction_id,
+                &payload.amount,
+                &payload.occurred_on.to_string(),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
-fn save_product_ordered(conn: &Connection, payload: ProductOrderedPayload) -> Result<(), String> {
-    let mut s = conn.prepare(r"INSERT INTO product_orders (order_id, amount,occurred_on, event_type, installment_type, insurance_code) VALUES(:id, :amount, :occurred_on, :event_type, :installment_type, :insurance_code)")
-    .unwrap();
-    s.bind::<&[(_, Value)]>(&[
-        (":id", payload.order_id.into()),
-        (":amount", payload.amount.into()),
-        (":occurred_on", payload.occurred_on.to_string().into()),
-        (":event_type", payload.event_type.to_string().into()),
-        (
-            ":installment_type",
-            payload.installment_type.to_string().into(),
-        ),
-        (":insurance_code", payload.insurance_code.to_string().into()),
-    ])
-    .map_err(|e| e.message.unwrap_or_default())?;
-    s.next().map_err(|e| e.to_string()).map(|_| ())
+fn save_product_ordered(client: &mut Client, payload: ProductOrderedPayload) -> Result<(), String> {
+    client.execute(r"
+     INSERT INTO product_orders (order_id, amount,occurred_on, event_type, installment_type, insurance_code) 
+     VALUES($1,$2,$3,$4,$5,$6)
+     ", &[
+        &payload.order_id,
+        &payload.amount,
+        &payload.occurred_on.to_string(),
+        &payload.event_type.to_string(),
+        &payload.installment_type.to_string(),
+        &payload.insurance_code,
+     ])
+    .map_err(|e| e.to_string())
+    .map(|_| ())
 }
 
 fn save_payment_collected(
-    conn: &Connection,
+    client: &mut Client,
     payload: PaymentCollectedPayload,
 ) -> Result<(), String> {
-    let mut s = conn.prepare(r"INSERT INTO payment_collections (payment_id, transaction_id,amount,occurred_on) VALUES(:payment_id, :transaction_id, :amount, :occurred_on)")
-    .unwrap();
-    s.bind::<&[(_, Value)]>(&[
-        (":payment_id", payload.payment_id.into()),
-        (":transaction_id", payload.transaction_id.into()),
-        (":amount", payload.amount.into()),
-        (":occurred_on", payload.occurred_on.to_string().into()),
-    ])
-    .map_err(|e| e.message.unwrap_or_default())?;
-    s.next().map_err(|e| e.to_string()).map(|_| ())
+    client
+        .execute(
+            r"
+    INSERT INTO payment_collections (payment_id, transaction_id,amount,occurred_on) 
+    VALUES($1,$2,$3,$4)
+    ",
+            &[
+                &payload.payment_id,
+                &payload.transaction_id,
+                &payload.amount,
+                &payload.occurred_on.to_string(),
+            ],
+        )
+        .map_err(|e| e.to_string())
+        .map(|_| ())
 }
 
 fn save_payment_authorized(
-    conn: &Connection,
+    client: &mut Client,
     payload: PaymentAuthorizedPayload,
 ) -> Result<(), String> {
-    let mut s = conn.prepare(r"INSERT INTO payment_authorizations (payment_id, order_id,amount,occurred_on) VALUES(:payment_id, :order_id, :amount, :occurred_on)")
-    .unwrap();
-    s.bind::<&[(_, Value)]>(&[
-        (":payment_id", payload.payment_id.into()),
-        (":order_id", payload.order_id.into()),
-        (":amount", payload.amount.into()),
-        (":occurred_on", payload.occurred_on.to_string().into()),
-    ])
-    .map_err(|e| e.message.unwrap_or_default())?;
-    s.next().map_err(|e| e.to_string()).map(|_| ())
+    client
+        .execute(
+            r"
+    INSERT INTO payment_authorizations (payment_id, order_id,amount,occurred_on) 
+    VALUES($1,$2,$3,$4)",
+            &[
+                &payload.payment_id,
+                &payload.order_id,
+                &payload.amount,
+                &payload.occurred_on.to_string(),
+            ],
+        )
+        .map_err(|e| e.to_string())
+        .map(|_| ())
 }

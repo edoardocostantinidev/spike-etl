@@ -1,22 +1,20 @@
 pub mod event_handler;
 pub mod events;
+pub mod pool;
 pub mod projectors;
 pub mod reconciliation_engine;
-
 #[cfg(test)]
 mod tests {
-    use sqlite::Connection;
-    use sqlite::ReadableWithIndex;
-
-    use crate::event_handler::*;
-    use crate::events::*;
+    use postgres::types::FromSql;
+    use postgres::Client;
     use std::fmt::Debug;
     use std::str::FromStr;
 
-    fn reset_db(connection: &Connection) {
-        connection
-            .execute(
-                r"
+    use crate::event_handler::*;
+    use crate::events::*;
+
+    fn reset_db(client: &mut Client) {
+        let queries = r"
         DROP TABLE IF EXISTS total_ordered;
         DROP TABLE IF EXISTS total_authorized;
         DROP TABLE IF EXISTS total_collected;
@@ -24,23 +22,21 @@ mod tests {
         DROP TABLE IF EXISTS payment_authorizations;
         DROP TABLE IF EXISTS payment_collections;
         DROP TABLE IF EXISTS product_orders;
-
-        
         
         CREATE TABLE total_ordered (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_authorized (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_collected (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
@@ -76,16 +72,21 @@ mod tests {
             insurance_code text,
             installment_type text,
             event_type text
-        );
-        ",
-            )
-            .unwrap();
+        );";
+        let s = queries
+            .split(";")
+            .map(|q| {
+                dbg!(format!("Executing {q}"));
+                client.execute(q, &[]).map(|_| ()).unwrap();
+            })
+            .collect::<Vec<_>>();
+        dbg!(s);
     }
 
     #[test]
     fn happy_path_reconciliation_engine() {
-        let conn = sqlite::open(":memory:").unwrap();
-        reset_db(&conn);
+        let client = &mut crate::pool::Pool::get_client();
+        reset_db(client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -115,40 +116,40 @@ mod tests {
             }),
         ];
 
-        let event_handler = EventHandler::new(&conn);
+        let event_handler = EventHandler::new();
         let handler_result = events
             .into_iter()
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
         assert!(handler_result.is_ok());
 
-        let mut s = conn
-            .prepare(r"SELECT SUM(amount) from total_ordered")
+        let s = client
+            .query(r"SELECT SUM(amount) from total_ordered", &[])
             .unwrap();
-        let _ = s.next();
-        let actual_total_ordered: f64 = s.read(0).unwrap();
+
+        let actual_total_ordered: f64 = s.get(0).unwrap().get(0);
 
         assert_eq!(
             actual_total_ordered, 100.0,
             "expecting the sum of all ordered events to be 100"
         );
 
-        let mut s = conn
-            .prepare(r"SELECT SUM(amount) from total_authorized")
+        let s = client
+            .query(r"SELECT SUM(amount) from total_authorized", &[])
             .unwrap();
-        let _ = s.next();
-        let actual_total_authorized: f64 = s.read(0).unwrap();
+
+        let actual_total_authorized: f64 = s.get(0).unwrap().get(0);
 
         assert_eq!(
             actual_total_authorized, 100.0,
             "expecting the sum of all authorized events to be 100"
         );
 
-        let mut s = conn
-            .prepare(r"SELECT SUM(amount) from total_collected")
+        let s = client
+            .query(r"SELECT SUM(amount) from total_collected", &[])
             .unwrap();
-        let _ = s.next();
-        let actual_total_collected: f64 = s.read(0).unwrap();
+
+        let actual_total_collected: f64 = s.get(0).unwrap().get(0);
 
         assert_eq!(
             actual_total_collected, 100.0,
@@ -156,25 +157,25 @@ mod tests {
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 0",
             0,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 0",
             0,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 1",
             1,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
             1,
         );
@@ -182,8 +183,8 @@ mod tests {
 
     #[test]
     fn events_type_not_reconciled() {
-        let conn = sqlite::open(":memory:").unwrap();
-        reset_db(&conn);
+        let client = &mut crate::pool::Pool::get_client();
+        reset_db(client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -214,7 +215,7 @@ mod tests {
             }),
         ];
 
-        let event_handler = EventHandler::new(&conn);
+        let event_handler = EventHandler::new();
         let handler_result = events
             .into_iter()
             .map(|e| event_handler.accept(e))
@@ -222,42 +223,41 @@ mod tests {
         assert!(handler_result.is_ok());
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
             1,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT SUM(amount) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
             100,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             2,
         );
         assert_query(
-            &conn,
+            client,
             r"SELECT SUM(amount) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             500,
         );
 
         assert_query(
-            &conn,
+            client,
             r"SELECT insurance_code FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             "PRP2".to_string(),
         );
     }
 
-    fn assert_query<T>(conn: &Connection, query: &str, value: T)
+    fn assert_query<T>(client: &mut Client, query: &str, value: T)
     where
-        T: ReadableWithIndex + Eq + Debug,
+        T: for<'a> FromSql<'a> + Eq + Debug,
     {
-        let mut s = conn.prepare(query).unwrap();
-        let _ = s.next();
-        let res: T = s.read(0).unwrap();
+        let s = client.query(query, &[]).unwrap();
+        let res: T = s.get(0).unwrap().get(0);
         assert_eq!(res, value, "expected {query} to return {:?}", value);
     }
 }

@@ -1,41 +1,28 @@
-use sqlite::Value;
-
 use crate::events::{Event, PaymentAuthorizedPayload};
 use crate::projectors::Projector;
 
-pub struct TotalAuthorizedProjector<'a> {
-    connection: &'a sqlite::Connection,
-}
+pub struct TotalAuthorizedProjector {}
 
-impl<'a> TotalAuthorizedProjector<'a> {
-    pub fn new(connection: &'a sqlite::Connection) -> Self {
-        Self { connection }
+impl TotalAuthorizedProjector {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl<'a> Projector for TotalAuthorizedProjector<'a> {
+impl Projector for TotalAuthorizedProjector {
     fn project(&self, event: Event) -> Result<(), String> {
         match event {
             Event::PaymentAuthorized(PaymentAuthorizedPayload {
                 amount,
                 occurred_on,
                 ..
-            }) => {
-                let mut statement = self
-                .connection
-                .prepare(
-                    r"INSERT INTO total_authorized (amount, occurred_on) VALUES(:amount,:occurred_on)",
+            }) => crate::pool::Pool::get_client()
+                .execute(
+                    r"INSERT INTO total_authorized (amount, occurred_on) VALUES($1,$2)",
+                    &[&amount, &occurred_on.to_string()],
                 )
-                .unwrap();
-                statement
-                    .bind::<&[(_, Value)]>(&[
-                        (":amount", amount.into()),
-                        (":occurred_on", occurred_on.to_string().into()),
-                    ])
-                    .map_err(|e| e.to_string())?;
-
-                statement.next().map_err(|e| e.to_string()).map(|_| ())
-            }
+                .map_err(|e| e.to_string())
+                .map(|_| ()),
             _ => Ok(()),
         }
     }

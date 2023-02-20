@@ -1,3 +1,4 @@
+use postgres::{Client, NoTls};
 use rand::Rng;
 use spike_costacando::{
     event_handler::EventHandler,
@@ -6,16 +7,15 @@ use spike_costacando::{
         ProductOrderedPayload,
     },
 };
-use sqlite::Connection;
 use std::vec;
 
 fn main() -> Result<(), String> {
     println!("AOO stoppepartì!");
     for num in [10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000] {
         let num_of_events_to_handle: usize = num;
-        let connection = sqlite::open(":memory:").map_err(|e| e.message.unwrap_or_default())?;
-        reset_db(&connection);
-        let handler = EventHandler::new(&connection);
+        let client = &mut spike_costacando::pool::Pool::get_client();
+        reset_db(client);
+        let handler = EventHandler::new();
         let mut events: Vec<spike_costacando::events::Event> = vec![];
         println!("Generating events...");
         for _i in 0..num_of_events_to_handle {
@@ -30,10 +30,8 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn reset_db(connection: &Connection) {
-    connection
-        .execute(
-            r"
+fn reset_db(client: &mut Client) {
+    let queries = r"
         DROP TABLE IF EXISTS total_ordered;
         DROP TABLE IF EXISTS total_authorized;
         DROP TABLE IF EXISTS total_collected;
@@ -41,23 +39,21 @@ fn reset_db(connection: &Connection) {
         DROP TABLE IF EXISTS payment_authorizations;
         DROP TABLE IF EXISTS payment_collections;
         DROP TABLE IF EXISTS product_orders;
-
-        
         
         CREATE TABLE total_ordered (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_authorized (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_collected (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
@@ -93,10 +89,15 @@ fn reset_db(connection: &Connection) {
             insurance_code text,
             installment_type text,
             event_type text
-        );
-        ",
-        )
-        .unwrap();
+        );";
+    let s = queries
+        .split(";")
+        .map(|q| {
+            dbg!(format!("Executing {q}"));
+            client.execute(q, &[]).map(|_| ()).unwrap();
+        })
+        .collect::<Vec<_>>();
+    dbg!(s);
 }
 
 fn generate_random_events(num_of_events_to_handle: usize) -> Vec<spike_costacando::events::Event> {

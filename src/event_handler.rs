@@ -26,20 +26,20 @@ impl Display for EventError {
     }
 }
 
-pub struct EventHandler<'a> {
-    projectors: Vec<Box<dyn Projector + 'a>>,
-    reconciliation_engine: ReconciliationEngine<'a>,
+pub struct EventHandler {
+    projectors: Vec<Box<dyn Projector>>,
+    reconciliation_engine: ReconciliationEngine,
 }
 
-impl<'a> EventHandler<'a> {
-    pub fn new(conn: &'a sqlite::Connection) -> Self {
+impl EventHandler {
+    pub fn new() -> Self {
         Self {
             projectors: vec![
-                Box::new(TotalOrderedProjector::new(conn)),
-                Box::new(TotalAuthorizedProjector::new(conn)),
-                Box::new(TotalCollectedProjector::new(conn)),
+                Box::new(TotalOrderedProjector::new()),
+                Box::new(TotalAuthorizedProjector::new()),
+                Box::new(TotalCollectedProjector::new()),
             ],
-            reconciliation_engine: ReconciliationEngine::new(conn),
+            reconciliation_engine: ReconciliationEngine::new(),
         }
     }
     pub fn accept(&self, event: Event) -> Result<(), EventError> {
