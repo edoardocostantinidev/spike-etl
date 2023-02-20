@@ -127,12 +127,18 @@ fn save_bank_transaction_issued(
 }
 
 fn save_product_ordered(conn: &Connection, payload: ProductOrderedPayload) -> Result<(), String> {
-    let mut s = conn.prepare(r"INSERT INTO product_orders (order_id, amount,occurred_on) VALUES(:id, :amount, :occurred_on)")
+    let mut s = conn.prepare(r"INSERT INTO product_orders (order_id, amount,occurred_on, event_type, installment_type, insurance_code) VALUES(:id, :amount, :occurred_on, :event_type, :installment_type, :insurance_code)")
     .unwrap();
     s.bind::<&[(_, Value)]>(&[
         (":id", payload.order_id.into()),
         (":amount", payload.amount.into()),
         (":occurred_on", payload.occurred_on.to_string().into()),
+        (":event_type", payload.event_type.to_string().into()),
+        (
+            ":installment_type",
+            payload.installment_type.to_string().into(),
+        ),
+        (":insurance_code", payload.insurance_code.to_string().into()),
     ])
     .map_err(|e| e.message.unwrap_or_default())?;
     s.next().map_err(|e| e.to_string()).map(|_| ())

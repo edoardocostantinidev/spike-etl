@@ -72,7 +72,10 @@ mod tests {
             order_id text PRIMARY KEY,
             amount float,
             occurred_on text,
-            reconciled int default 0
+            reconciled int default 0,
+            insurance_code text,
+            installment_type text,
+            event_type text
         );
         ",
             )
@@ -89,6 +92,9 @@ mod tests {
                 order_id: "ord_1".to_owned(),
                 guarantees: vec![],
                 occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:00.000Z").unwrap(),
+                event_type: EventType::Issuance,
+                installment_type: InstallmentType::Yearly,
+                insurance_code: "PRP123".to_string(),
             }),
             Event::PaymentAuthorized(PaymentAuthorizedPayload {
                 amount: 100.0,
@@ -114,7 +120,6 @@ mod tests {
             .into_iter()
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
-        dbg!(&handler_result);
         assert!(handler_result.is_ok());
 
         let mut s = conn
@@ -172,6 +177,77 @@ mod tests {
             &conn,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
             1,
+        );
+    }
+
+    #[test]
+    fn events_type_not_reconciled() {
+        let conn = sqlite::open(":memory:").unwrap();
+        reset_db(&conn);
+        let events = [
+            Event::ProductOrdered(ProductOrderedPayload {
+                amount: 100.0,
+                order_id: "ord_1".to_owned(),
+                guarantees: vec![],
+                occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:00.000Z").unwrap(),
+                event_type: EventType::Issuance,
+                installment_type: InstallmentType::Yearly,
+                insurance_code: "PRP1".to_owned(),
+            }),
+            Event::ProductOrdered(ProductOrderedPayload {
+                amount: 200.0,
+                order_id: "ord_2".to_owned(),
+                guarantees: vec![],
+                occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:00.000Z").unwrap(),
+                event_type: EventType::Interruption,
+                installment_type: InstallmentType::BiYearly,
+                insurance_code: "PRP2".to_owned(),
+            }),
+            Event::ProductOrdered(ProductOrderedPayload {
+                amount: 300.0,
+                order_id: "ord_3".to_owned(),
+                guarantees: vec![],
+                occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:00.000Z").unwrap(),
+                event_type: EventType::Interruption,
+                installment_type: InstallmentType::BiYearly,
+                insurance_code: "PRP3".to_owned(),
+            }),
+        ];
+
+        let event_handler = EventHandler::new(&conn);
+        let handler_result = events
+            .into_iter()
+            .map(|e| event_handler.accept(e))
+            .collect::<Result<Vec<_>, _>>();
+        assert!(handler_result.is_ok());
+
+        assert_query(
+            &conn,
+            r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
+            1,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT SUM(amount) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
+            100,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            2,
+        );
+        assert_query(
+            &conn,
+            r"SELECT SUM(amount) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            500,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT insurance_code FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            "PRP2".to_string(),
         );
     }
 
