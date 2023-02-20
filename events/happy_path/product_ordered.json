@@ -1,5 +1,5 @@
 {
-    "type": "product_ordered",
+    "type": "product_orderedt",
     "order_id": "prod_1",
     "guarantees": [
         {

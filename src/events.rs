@@ -25,7 +25,7 @@ pub struct PaymentAuthorizedPayload {
 
 #[derive(Clone)]
 pub struct PaymentCollectedPayload {
-    pub order_id: String,
+    pub payment_id: String,
     pub transaction_id: String,
     pub amount: f64,
     pub occurred_on: DateTime<Utc>,

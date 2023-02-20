@@ -6,9 +6,11 @@ pub mod reconciliation_engine;
 #[cfg(test)]
 mod tests {
     use sqlite::Connection;
+    use sqlite::ReadableWithIndex;
 
     use crate::event_handler::*;
     use crate::events::*;
+    use std::fmt::Debug;
     use std::str::FromStr;
 
     fn reset_db(connection: &Connection) {
@@ -22,6 +24,8 @@ mod tests {
         DROP TABLE IF EXISTS payment_authorizations;
         DROP TABLE IF EXISTS payment_collections;
         DROP TABLE IF EXISTS product_orders;
+
+        
         
         CREATE TABLE total_ordered (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +49,7 @@ mod tests {
             transaction_id text PRIMARY KEY,
             amount float,
             occurred_on text,
-            reconciled bool
+            reconciled int default 0
         );
 
         CREATE TABLE payment_authorizations (
@@ -67,7 +71,8 @@ mod tests {
         CREATE TABLE product_orders (
             order_id text PRIMARY KEY,
             amount float,
-            occurred_on text
+            occurred_on text,
+            reconciled int default 0
         );
         ",
             )
@@ -88,12 +93,12 @@ mod tests {
             Event::PaymentAuthorized(PaymentAuthorizedPayload {
                 amount: 100.0,
                 order_id: "ord_1".to_owned(),
-                payment_id: "payment_1".to_owned(),
+                payment_id: "pay_1".to_owned(),
                 occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:01.000Z").unwrap(),
             }),
             Event::PaymentCollected(PaymentCollectedPayload {
                 amount: 100.0,
-                order_id: "ord_1".to_owned(),
+                payment_id: "pay_1".to_owned(),
                 transaction_id: "tran_1".to_owned(),
                 occurred_on: chrono::DateTime::from_str("2023-02-20T10:00:00.000Z").unwrap(),
             }),
@@ -109,6 +114,7 @@ mod tests {
             .into_iter()
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
+        dbg!(&handler_result);
         assert!(handler_result.is_ok());
 
         let mut s = conn
@@ -144,6 +150,38 @@ mod tests {
             "expecting the sum of all collected events to be 100"
         );
 
-        //assert on view outputs
+        assert_query(
+            &conn,
+            r"SELECT COUNT(order_id) from product_orders where reconciled = 0",
+            0,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 0",
+            0,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT COUNT(order_id) from product_orders where reconciled = 1",
+            1,
+        );
+
+        assert_query(
+            &conn,
+            r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
+            1,
+        );
+    }
+
+    fn assert_query<T>(conn: &Connection, query: &str, value: T)
+    where
+        T: ReadableWithIndex + Eq + Debug,
+    {
+        let mut s = conn.prepare(query).unwrap();
+        let _ = s.next();
+        let res: T = s.read(0).unwrap();
+        assert_eq!(res, value, "expected {query} to return {:?}", value);
     }
 }
