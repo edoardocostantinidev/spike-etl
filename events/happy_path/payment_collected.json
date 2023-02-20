@@ -1,0 +1,7 @@
+{
+    "type": "payment_collected",
+    "order_id": "ord_1",
+    "transaction_id": "tran_1",
+    "amount": 319.32,
+    "occurred_on": "2023-02-20T10:36:33:239Z"
+}

@@ -1,0 +1,7 @@
+{
+    "type": "payment_authorized",
+    "order_id": "ord_1",
+    "payment_id": "payment_1",
+    "amount": 319.32,
+    "occurred_on": "2023-02-20T10:36:33:239Z"
+}
