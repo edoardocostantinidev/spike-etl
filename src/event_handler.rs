@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::events::*;
 use crate::projectors::total_authorized_projector::TotalAuthorizedProjector;
 use crate::projectors::total_collected_projector::TotalCollectedProjector;
@@ -10,6 +12,18 @@ pub enum EventError {
     UnknownEvent(String),
     ProjectionError(String),
     ReconcilationEngineError(String),
+}
+
+impl Display for EventError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventError::UnknownEvent(s) => f.write_fmt(format_args!("Unknown Error: {s}")),
+            EventError::ProjectionError(s) => f.write_fmt(format_args!("Projection Error: {s}")),
+            EventError::ReconcilationEngineError(s) => {
+                f.write_fmt(format_args!("Reconciliation Engine Error: {s}"))
+            }
+        }
+    }
 }
 
 pub struct EventHandler<'a> {
