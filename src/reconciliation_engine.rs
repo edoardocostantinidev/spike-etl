@@ -21,7 +21,7 @@ impl ReconciliationEngine {
             Event::BankTransactionIssued(payload) => {
                 save_bank_transaction_issued(&mut client, payload.clone())?;
                 let query = "
-                SELECT bt.transaction_id, po.order_id, bt.amount 
+                SELECT bt.transaction_id, po.order_id, bt.amount, po.amount
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
                 WHERE bt.transaction_id = $1
                 AND bt.transaction_id = pc.transaction_id
@@ -32,7 +32,7 @@ impl ReconciliationEngine {
             Event::PaymentAuthorized(payload) => {
                 save_payment_authorized(&mut client, payload.clone())?;
                 let query = "
-                SELECT bt.transaction_id, po.order_id, bt.amount
+                SELECT bt.transaction_id, po.order_id, bt.amount, po.amount
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
                 WHERE pa.payment_id = $1
                 AND bt.transaction_id = pc.transaction_id
@@ -43,7 +43,7 @@ impl ReconciliationEngine {
             Event::PaymentCollected(payload) => {
                 save_payment_collected(&mut client, payload.clone())?;
                 let query = "
-                SELECT bt.transaction_id, po.order_id, bt.amount
+                SELECT bt.transaction_id, po.order_id, bt.amount, po.amount
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
                 WHERE pc.payment_id = $1
                 AND bt.transaction_id = pc.transaction_id
@@ -54,7 +54,7 @@ impl ReconciliationEngine {
             Event::ProductOrdered(payload) => {
                 save_product_ordered(&mut client, payload.clone())?;
                 let query = "
-                SELECT bt.transaction_id, po.order_id, bt.amount 
+                SELECT bt.transaction_id, po.order_id, bt.amount, po.amount
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
                 WHERE po.order_id = $1
                 AND bt.transaction_id = pc.transaction_id
@@ -65,13 +65,12 @@ impl ReconciliationEngine {
         };
 
         if let Some(x) = result.unwrap().get(0) {
-            let (t_id, o_id, collected_amount): (String, String, f64) =
-                (x.get(0), x.get(1), x.get(2));
-            //if amounts concile
+            let (t_id, o_id, collected_amount, ordered_amount): (String, String, f64, f64) =
+                (x.get(0), x.get(1), x.get(2), x.get(3));
             client
                 .execute(
-                    r"UPDATE bank_transactions SET reconciled = 1 WHERE transaction_id = $1",
-                    &[&t_id],
+                    r"UPDATE bank_transactions SET ordered_amount = (ordered_amount + $2) WHERE transaction_id = $1",
+                    &[&t_id,&ordered_amount],
                 )
                 .map_err(|e| e.to_string())?;
             client

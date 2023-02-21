@@ -50,8 +50,8 @@ pub fn reset_db(client: &mut Client) {
         CREATE TABLE bank_transactions (
             transaction_id text PRIMARY KEY,
             amount double precision,
-            occurred_on text,
-            reconciled int4 default 0
+            ordered_amount double precision default 0,
+            occurred_on text
         );
 
         CREATE TABLE payment_authorizations (

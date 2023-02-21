@@ -99,7 +99,7 @@ mod tests {
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 0",
+            r"SELECT COUNT(transaction_id) from bank_transactions where ordered_amount <> amount",
             0 as i64,
         );
 
@@ -111,7 +111,7 @@ mod tests {
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
+            r"SELECT COUNT(transaction_id) from bank_transactions where ordered_amount = amount",
             1 as i64,
         );
     }
