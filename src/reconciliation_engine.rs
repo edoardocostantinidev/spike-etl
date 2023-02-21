@@ -1,11 +1,11 @@
-use postgres::Client;
+type Client = PooledConnection<PostgresConnectionManager<NoTls>>;
 
-use crate::{
-    events::{
-        BankTransactionIssuedPayload, Event, PaymentAuthorizedPayload, PaymentCollectedPayload,
-        ProductOrderedPayload,
-    },
-    pool::Pool,
+use postgres::NoTls;
+use r2d2_postgres::{r2d2::PooledConnection, PostgresConnectionManager};
+
+use crate::events::{
+    BankTransactionIssuedPayload, Event, PaymentAuthorizedPayload, PaymentCollectedPayload,
+    ProductOrderedPayload,
 };
 
 pub struct ReconciliationEngine {}
@@ -16,10 +16,10 @@ impl ReconciliationEngine {
     }
 
     pub fn reconcile(&self, event: Event) -> Result<(), String> {
-        let client = &mut Pool::get_client();
+        let mut client = crate::pool::POOL.get().unwrap();
         let result = match event {
             Event::BankTransactionIssued(payload) => {
-                save_bank_transaction_issued(client, payload.clone())?;
+                save_bank_transaction_issued(&mut client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
@@ -30,7 +30,7 @@ impl ReconciliationEngine {
                 client.query(query, &[&payload.transaction_id])
             }
             Event::PaymentAuthorized(payload) => {
-                save_payment_authorized(client, payload.clone())?;
+                save_payment_authorized(&mut client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
@@ -41,7 +41,7 @@ impl ReconciliationEngine {
                 client.query(query, &[&payload.payment_id])
             }
             Event::PaymentCollected(payload) => {
-                save_payment_collected(client, payload.clone())?;
+                save_payment_collected(&mut client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
@@ -52,7 +52,7 @@ impl ReconciliationEngine {
                 client.query(query, &[&payload.payment_id])
             }
             Event::ProductOrdered(payload) => {
-                save_product_ordered(client, payload.clone())?;
+                save_product_ordered(&mut client, payload.clone())?;
                 let query = "
                 SELECT bt.transaction_id, po.order_id, pc.payment_id 
                 FROM bank_transactions bt, payment_collections pc, product_orders po, payment_authorizations pa 
@@ -63,7 +63,7 @@ impl ReconciliationEngine {
                 client.query(query, &[&payload.order_id])
             }
         };
-        dbg!(&result);
+
         if let Some(x) = result.unwrap().get(0) {
             let (t_id, o_id, _p_id): (String, String, String) = (x.get(0), x.get(1), x.get(2));
             //if amounts concile

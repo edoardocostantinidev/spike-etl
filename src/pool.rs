@@ -1,12 +1,15 @@
-use postgres::{Client, NoTls};
-pub struct Pool;
+use lazy_static::lazy_static;
+use postgres::NoTls;
+use r2d2_postgres::{r2d2, PostgresConnectionManager};
 
-impl Pool {
-    pub fn get_client() -> Client {
-        Client::connect(
-            "host=localhost user=user password=password port=5432 connect_timeout=5",
+lazy_static! {
+    pub static ref POOL: r2d2::Pool<PostgresConnectionManager<NoTls>> = {
+        let manager = PostgresConnectionManager::new(
+            "host=localhost user=user password=password port=5432 connect_timeout=5"
+                .parse()
+                .unwrap(),
             NoTls,
-        )
-        .unwrap()
-    }
+        );
+        r2d2::Pool::new(manager).unwrap()
+    };
 }

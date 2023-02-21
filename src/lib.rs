@@ -6,13 +6,16 @@ pub mod reconciliation_engine;
 #[cfg(test)]
 mod tests {
     use postgres::types::FromSql;
-    use postgres::Client;
+
+    use postgres::NoTls;
+    use r2d2_postgres::r2d2::PooledConnection;
+    use r2d2_postgres::PostgresConnectionManager;
     use std::fmt::Debug;
     use std::str::FromStr;
 
     use crate::event_handler::*;
     use crate::events::*;
-    use crate::pool::Pool;
+    type Client = PooledConnection<PostgresConnectionManager<NoTls>>;
 
     fn reset_db(client: &mut Client) {
         let queries = r"
@@ -82,8 +85,8 @@ mod tests {
 
     #[test]
     fn happy_path_reconciliation_engine() {
-        let client = &mut Pool::get_client();
-        reset_db(client);
+        let mut client = crate::pool::POOL.get().unwrap();
+        reset_db(&mut client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -119,7 +122,6 @@ mod tests {
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
 
-        dbg!(&handler_result);
         assert!(handler_result.is_ok());
 
         let s = client
@@ -156,25 +158,25 @@ mod tests {
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 0",
             0 as i64,
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 0",
             0 as i64,
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 1",
             1 as i64,
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
             1 as i64,
         );
@@ -182,8 +184,8 @@ mod tests {
 
     #[test]
     fn events_type_not_reconciled() {
-        let client = &mut Pool::get_client();
-        reset_db(client);
+        let mut client = crate::pool::POOL.get().unwrap();
+        reset_db(&mut client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -222,33 +224,33 @@ mod tests {
         assert!(handler_result.is_ok());
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
             1 as i64,
         );
 
         assert_query(
-            client,
-            r"SELECT SUM(amount) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
+            &mut client,
+            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
             100 as i64,
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             2 as i64,
         );
         assert_query(
-            client,
-            r"SELECT SUM(amount) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            &mut client,
+            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             500 as i64,
         );
 
         assert_query(
-            client,
+            &mut client,
             r"SELECT insurance_code FROM product_orders WHERE event_type='interruption' AND reconciled=0",
             "PRP2".to_string(),
-        );
+        )
     }
 
     fn assert_query<T>(client: &mut Client, query: &str, value: T)

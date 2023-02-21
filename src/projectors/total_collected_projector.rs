@@ -1,6 +1,5 @@
 use crate::events::BankTransactionIssuedPayload;
 use crate::events::Event;
-use crate::pool::Pool;
 use crate::projectors::Projector;
 
 pub struct TotalCollectedProjector {}
@@ -18,7 +17,9 @@ impl Projector for TotalCollectedProjector {
                 amount,
                 occurred_on,
                 ..
-            }) => Pool::get_client()
+            }) => crate::pool::POOL
+                .get()
+                .unwrap()
                 .execute(
                     r"INSERT INTO total_collected (amount, occurred_on) VALUES($1,$2)",
                     &[&amount, &occurred_on.to_string()],

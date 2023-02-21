@@ -1,6 +1,5 @@
 use crate::events::Event;
 use crate::events::ProductOrderedPayload;
-use crate::pool::Pool;
 use crate::projectors::Projector;
 
 pub struct TotalOrderedProjector {}
@@ -18,7 +17,9 @@ impl Projector for TotalOrderedProjector {
                 amount,
                 occurred_on,
                 ..
-            }) => Pool::get_client()
+            }) => crate::pool::POOL
+                .get()
+                .unwrap()
                 .execute(
                     r"INSERT INTO total_ordered (amount, occurred_on) VALUES($1,$2)",
                     &[&amount, &occurred_on.to_string()],
