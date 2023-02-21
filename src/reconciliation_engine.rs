@@ -1,8 +1,11 @@
 use postgres::Client;
 
-use crate::events::{
-    BankTransactionIssuedPayload, Event, PaymentAuthorizedPayload, PaymentCollectedPayload,
-    ProductOrderedPayload,
+use crate::{
+    events::{
+        BankTransactionIssuedPayload, Event, PaymentAuthorizedPayload, PaymentCollectedPayload,
+        ProductOrderedPayload,
+    },
+    pool::Pool,
 };
 
 pub struct ReconciliationEngine {}
@@ -13,7 +16,7 @@ impl ReconciliationEngine {
     }
 
     pub fn reconcile(&self, event: Event) -> Result<(), String> {
-        let client: &mut Client = &mut crate::pool::Pool::get_client();
+        let client = &mut Pool::get_client();
         let result = match event {
             Event::BankTransactionIssued(payload) => {
                 save_bank_transaction_issued(client, payload.clone())?;
@@ -60,7 +63,7 @@ impl ReconciliationEngine {
                 client.query(query, &[&payload.order_id])
             }
         };
-
+        dbg!(&result);
         if let Some(x) = result.unwrap().get(0) {
             let (t_id, o_id, _p_id): (String, String, String) = (x.get(0), x.get(1), x.get(2));
             //if amounts concile

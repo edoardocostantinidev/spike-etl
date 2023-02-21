@@ -12,6 +12,7 @@ mod tests {
 
     use crate::event_handler::*;
     use crate::events::*;
+    use crate::pool::Pool;
 
     fn reset_db(client: &mut Client) {
         let queries = r"
@@ -24,34 +25,34 @@ mod tests {
         DROP TABLE IF EXISTS product_orders;
         
         CREATE TABLE total_ordered (
-            id BIGSERIAL PRIMARY KEY,
-            amount float,
+            id SERIAL PRIMARY KEY,
+            amount double precision,
             occurred_on text
         );
 
         CREATE TABLE total_authorized (
-            id BIGSERIAL PRIMARY KEY,
-            amount float,
+            id SERIAL PRIMARY KEY,
+            amount double precision,
             occurred_on text
         );
 
         CREATE TABLE total_collected (
-            id BIGSERIAL PRIMARY KEY,
-            amount float,
+            id SERIAL PRIMARY KEY,
+            amount double precision,
             occurred_on text
         );
         
         CREATE TABLE bank_transactions (
             transaction_id text PRIMARY KEY,
-            amount float,
+            amount double precision,
             occurred_on text,
-            reconciled int default 0
+            reconciled int4 default 0
         );
 
         CREATE TABLE payment_authorizations (
             payment_id text,
             order_id text,
-            amount float,
+            amount double precision,
             occurred_on text,
             PRIMARY KEY (order_id, payment_id)
         );
@@ -59,33 +60,29 @@ mod tests {
         CREATE TABLE payment_collections (
             payment_id text,
             transaction_id text,
-            amount float,
+            amount double precision,
             occurred_on text,
             PRIMARY KEY (transaction_id, payment_id)
         );
 
         CREATE TABLE product_orders (
             order_id text PRIMARY KEY,
-            amount float,
+            amount double precision,
             occurred_on text,
-            reconciled int default 0,
+            reconciled int4 default 0,
             insurance_code text,
             installment_type text,
             event_type text
         );";
-        let s = queries
-            .split(";")
-            .map(|q| {
-                dbg!(format!("Executing {q}"));
-                client.execute(q, &[]).map(|_| ()).unwrap();
-            })
-            .collect::<Vec<_>>();
-        dbg!(s);
+
+        queries.split(";").filter(|s| !s.is_empty()).for_each(|q| {
+            client.execute(q, &[]).map(|_| ()).unwrap();
+        });
     }
 
     #[test]
     fn happy_path_reconciliation_engine() {
-        let client = &mut crate::pool::Pool::get_client();
+        let client = &mut Pool::get_client();
         reset_db(client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
@@ -121,6 +118,8 @@ mod tests {
             .into_iter()
             .map(|e| event_handler.accept(e))
             .collect::<Result<Vec<_>, _>>();
+
+        dbg!(&handler_result);
         assert!(handler_result.is_ok());
 
         let s = client
@@ -152,38 +151,38 @@ mod tests {
         let actual_total_collected: f64 = s.get(0).unwrap().get(0);
 
         assert_eq!(
-            actual_total_collected, 100.0,
+            actual_total_collected, 100.0 as f64,
             "expecting the sum of all collected events to be 100"
         );
 
         assert_query(
             client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 0",
-            0,
+            0 as i64,
         );
 
         assert_query(
             client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 0",
-            0,
+            0 as i64,
         );
 
         assert_query(
             client,
             r"SELECT COUNT(order_id) from product_orders where reconciled = 1",
-            1,
+            1 as i64,
         );
 
         assert_query(
             client,
             r"SELECT COUNT(transaction_id) from bank_transactions where reconciled = 1",
-            1,
+            1 as i64,
         );
     }
 
     #[test]
     fn events_type_not_reconciled() {
-        let client = &mut crate::pool::Pool::get_client();
+        let client = &mut Pool::get_client();
         reset_db(client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
@@ -225,24 +224,24 @@ mod tests {
         assert_query(
             client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
-            1,
+            1 as i64,
         );
 
         assert_query(
             client,
             r"SELECT SUM(amount) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
-            100,
+            100 as i64,
         );
 
         assert_query(
             client,
             r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
-            2,
+            2 as i64,
         );
         assert_query(
             client,
             r"SELECT SUM(amount) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
-            500,
+            500 as i64,
         );
 
         assert_query(

@@ -1,4 +1,5 @@
 use crate::events::{Event, PaymentAuthorizedPayload};
+use crate::pool::Pool;
 use crate::projectors::Projector;
 
 pub struct TotalAuthorizedProjector {}
@@ -16,7 +17,7 @@ impl Projector for TotalAuthorizedProjector {
                 amount,
                 occurred_on,
                 ..
-            }) => crate::pool::Pool::get_client()
+            }) => Pool::get_client()
                 .execute(
                     r"INSERT INTO total_authorized (amount, occurred_on) VALUES($1,$2)",
                     &[&amount, &occurred_on.to_string()],

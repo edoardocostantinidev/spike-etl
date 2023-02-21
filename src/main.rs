@@ -1,4 +1,4 @@
-use postgres::{Client, NoTls};
+use postgres::Client;
 use rand::Rng;
 use spike_costacando::{
     event_handler::EventHandler,
@@ -6,6 +6,7 @@ use spike_costacando::{
         BankTransactionIssuedPayload, PaymentAuthorizedPayload, PaymentCollectedPayload,
         ProductOrderedPayload,
     },
+    pool::Pool,
 };
 use std::vec;
 
@@ -13,7 +14,7 @@ fn main() -> Result<(), String> {
     println!("AOO stoppepartì!");
     for num in [10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000] {
         let num_of_events_to_handle: usize = num;
-        let client = &mut spike_costacando::pool::Pool::get_client();
+        let client = &mut Pool::get_client();
         reset_db(client);
         let handler = EventHandler::new();
         let mut events: Vec<spike_costacando::events::Event> = vec![];
@@ -41,19 +42,19 @@ fn reset_db(client: &mut Client) {
         DROP TABLE IF EXISTS product_orders;
         
         CREATE TABLE total_ordered (
-            id BIGSERIAL PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_authorized (
-            id BIGSERIAL PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
 
         CREATE TABLE total_collected (
-            id BIGSERIAL PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             amount float,
             occurred_on text
         );
@@ -90,14 +91,11 @@ fn reset_db(client: &mut Client) {
             installment_type text,
             event_type text
         );";
-    let s = queries
-        .split(";")
-        .map(|q| {
-            dbg!(format!("Executing {q}"));
-            client.execute(q, &[]).map(|_| ()).unwrap();
-        })
-        .collect::<Vec<_>>();
-    dbg!(s);
+    queries.split(";").filter(|s| !s.is_empty()).for_each(|q| {
+        println!("Executing {q}");
+        client.execute(q, &[]).map(|_| ()).unwrap();
+        println!("Executed {q}");
+    });
 }
 
 fn generate_random_events(num_of_events_to_handle: usize) -> Vec<spike_costacando::events::Event> {
