@@ -5,6 +5,25 @@ use r2d2_postgres::{
     PostgresConnectionManager,
 };
 
+/*
+   bank transactions ->
+       UPSERT transaction_id#000 VALUE amount
+   product ordered ->
+       UPSERT order_id#000 VALUE amount
+   payment collected ->
+       UPSERT payment_id#000 VALUE amount
+       UPSERT transaction_id#000 VALUE relative_payment=payment_id#000
+   payment authorized ->
+       UPSERT payment_id#000 VALUE amount relative_order=order_id#000
+       UPSERT order_id#000 VALUE amount relative_payment=payment_id#000
+
+    reconcile:
+    bank transactions -> GET FROM transaction_id#000 relative_payment -> GET FROM payment_id#000 relative_order=order_id#000 -> GET FROM order_id#000
+    product ordered ->
+    payment collected ->
+    payment authorized ->
+*/
+
 lazy_static! {
     pub static ref POOL: r2d2::Pool<PostgresConnectionManager<NoTls>> = {
         let manager = PostgresConnectionManager::new(
