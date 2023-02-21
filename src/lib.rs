@@ -17,76 +17,10 @@ mod tests {
     use crate::events::*;
     type Client = PooledConnection<PostgresConnectionManager<NoTls>>;
 
-    fn reset_db(client: &mut Client) {
-        let queries = r"
-        DROP TABLE IF EXISTS total_ordered;
-        DROP TABLE IF EXISTS total_authorized;
-        DROP TABLE IF EXISTS total_collected;
-        DROP TABLE IF EXISTS bank_transactions;
-        DROP TABLE IF EXISTS payment_authorizations;
-        DROP TABLE IF EXISTS payment_collections;
-        DROP TABLE IF EXISTS product_orders;
-        
-        CREATE TABLE total_ordered (
-            id SERIAL PRIMARY KEY,
-            amount double precision,
-            occurred_on text
-        );
-
-        CREATE TABLE total_authorized (
-            id SERIAL PRIMARY KEY,
-            amount double precision,
-            occurred_on text
-        );
-
-        CREATE TABLE total_collected (
-            id SERIAL PRIMARY KEY,
-            amount double precision,
-            occurred_on text
-        );
-        
-        CREATE TABLE bank_transactions (
-            transaction_id text PRIMARY KEY,
-            amount double precision,
-            occurred_on text,
-            reconciled int4 default 0
-        );
-
-        CREATE TABLE payment_authorizations (
-            payment_id text,
-            order_id text,
-            amount double precision,
-            occurred_on text,
-            PRIMARY KEY (order_id, payment_id)
-        );
-
-        CREATE TABLE payment_collections (
-            payment_id text,
-            transaction_id text,
-            amount double precision,
-            occurred_on text,
-            PRIMARY KEY (transaction_id, payment_id)
-        );
-
-        CREATE TABLE product_orders (
-            order_id text PRIMARY KEY,
-            amount double precision,
-            occurred_on text,
-            reconciled int4 default 0,
-            insurance_code text,
-            installment_type text,
-            event_type text
-        );";
-
-        queries.split(";").filter(|s| !s.is_empty()).for_each(|q| {
-            client.execute(q, &[]).map(|_| ()).unwrap();
-        });
-    }
-
     #[test]
     fn happy_path_reconciliation_engine() {
         let mut client = crate::pool::POOL.get().unwrap();
-        reset_db(&mut client);
+        crate::pool::reset_db(&mut client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -159,7 +93,7 @@ mod tests {
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(order_id) from product_orders where reconciled = 0",
+            r"SELECT COUNT(order_id) from product_orders where  collected_amount <> amount",
             0 as i64,
         );
 
@@ -171,7 +105,7 @@ mod tests {
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(order_id) from product_orders where reconciled = 1",
+            r"SELECT COUNT(order_id) from product_orders where collected_amount = amount",
             1 as i64,
         );
 
@@ -185,7 +119,7 @@ mod tests {
     #[test]
     fn events_type_not_reconciled() {
         let mut client = crate::pool::POOL.get().unwrap();
-        reset_db(&mut client);
+        crate::pool::reset_db(&mut client);
         let events = [
             Event::ProductOrdered(ProductOrderedPayload {
                 amount: 100.0,
@@ -225,30 +159,30 @@ mod tests {
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
+            r"SELECT COUNT(*) FROM product_orders WHERE event_type='issuance' AND collected_amount <> amount",
             1 as i64,
         );
 
         assert_query(
             &mut client,
-            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='issuance' AND reconciled=0",
+            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='issuance' AND collected_amount <> amount",
             100 as i64,
         );
 
         assert_query(
             &mut client,
-            r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            r"SELECT COUNT(*) FROM product_orders WHERE event_type='interruption' AND collected_amount <> amount",
             2 as i64,
         );
         assert_query(
             &mut client,
-            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            r"SELECT CAST(SUM(amount) as int8) FROM product_orders WHERE event_type='interruption' AND collected_amount <> amount",
             500 as i64,
         );
 
         assert_query(
             &mut client,
-            r"SELECT insurance_code FROM product_orders WHERE event_type='interruption' AND reconciled=0",
+            r"SELECT insurance_code FROM product_orders WHERE event_type='interruption' AND collected_amount <> amount",
             "PRP2".to_string(),
         )
     }
