@@ -44,8 +44,7 @@ fn reconciliate_bank_transaction_issued(
     client: &mut Client,
     payload: BankTransactionIssuedPayload,
 ) -> Result<(), postgres::Error> {
-    let mut t = client.transaction().unwrap();
-    let rows = t
+    let rows = client
         .query(
             r"SELECT transaction_id, order_id, payment_id 
         FROM relations 
@@ -56,16 +55,14 @@ fn reconciliate_bank_transaction_issued(
         )
         .unwrap();
 
-    do_reconcile(&mut t, rows)?;
-    t.commit()
+    do_reconcile(client, rows)
 }
 
 fn reconciliate_product_ordered(
     client: &mut Client,
     payload: ProductOrderedPayload,
 ) -> Result<(), postgres::Error> {
-    let mut t = client.transaction().unwrap();
-    let rows = t
+    let rows = client
         .query(
             r"SELECT transaction_id, order_id, payment_id 
         FROM relations 
@@ -75,16 +72,14 @@ fn reconciliate_product_ordered(
             &[&payload.order_id],
         )
         .unwrap();
-    do_reconcile(&mut t, rows)?;
-    t.commit()
+    do_reconcile(client, rows)
 }
 
 fn reconciliate_payment_authorized(
     client: &mut Client,
     payload: PaymentAuthorizedPayload,
 ) -> Result<(), postgres::Error> {
-    let mut t = client.transaction().unwrap();
-    let rows = t
+    let rows = client
         .query(
             r"SELECT r.transaction_id, r.order_id, r.payment_id 
         FROM relations r, product_orders po
@@ -95,16 +90,14 @@ fn reconciliate_payment_authorized(
             &[&payload.order_id, &payload.payment_id],
         )
         .unwrap();
-    do_reconcile(&mut t, rows)?;
-    t.commit()
+    do_reconcile(client, rows)
 }
 
 fn reconciliate_payment_collected(
     client: &mut Client,
     payload: PaymentCollectedPayload,
 ) -> Result<(), postgres::Error> {
-    let mut t = client.transaction().unwrap();
-    let rows = t
+    let rows = client
         .query(
             r"SELECT r.transaction_id, r.order_id, r.payment_id 
         FROM relations r, bank_transactions bt
@@ -115,11 +108,10 @@ fn reconciliate_payment_collected(
             &[&payload.transaction_id, &payload.payment_id],
         )
         .unwrap();
-    do_reconcile(&mut t, rows)?;
-    t.commit()
+    do_reconcile(client, rows)
 }
 
-fn do_reconcile(t: &mut Transaction, rows: Vec<Row>) -> Result<(), postgres::Error> {
+fn do_reconcile(t: &mut Client, rows: Vec<Row>) -> Result<(), postgres::Error> {
     rows.into_iter()
         .map(|x| (x.get(0), x.get(1), x.get(2)))
         .for_each(|(t_id, o_id, p_id): (String, String, String)| {
