@@ -22,6 +22,18 @@ use r2d2_postgres::{
     product ordered ->
     payment collected ->
     payment authorized ->
+
+
+
+    RELATIONS
+    (t_id,o_id,p_id)   -> completo
+    bank transactions  -> cerco t_id in relations, se non c'è scrivo t_id in relations
+    product ordered    -> cerco o_id in relations, se non c'è scrivo o_id in relations
+    payment collected  -> cerco t_id/p_id in relations -> aggiungo info mancante / scrivo t_id e p_id in relations
+    payment authorized -> cerco o_id/p_id in relations -> aggiungo info mancante / scrivo p_id e o_id in relations
+
+    quando riconcilio:
+    cerco per chiave naturale su relations e faccio i confronti necessari.
 */
 
 lazy_static! {
@@ -47,6 +59,7 @@ pub fn reset_db(client: &mut Client) {
         DROP TABLE IF EXISTS payment_authorizations;
         DROP TABLE IF EXISTS payment_collections;
         DROP TABLE IF EXISTS product_orders;
+        DROP TABLE IF EXISTS relations;
         
         CREATE TABLE total_ordered (
             id SERIAL PRIMARY KEY,
@@ -97,7 +110,19 @@ pub fn reset_db(client: &mut Client) {
             insurance_code text,
             installment_type text,
             event_type text
-        );";
+        );
+        
+        CREATE TABLE relations (
+            id BIGSERIAL PRIMARY KEY,
+            payment_id text default null,
+            order_id text default null,
+            transaction_id text default null
+        );
+
+        CREATE INDEX t_id_idx ON relations(transaction_id);
+        CREATE INDEX p_id_idx ON relations(payment_id);
+        CREATE INDEX o_id_idx ON relations(order_id);
+        ";
 
     queries.split(";").filter(|s| !s.is_empty()).for_each(|q| {
         client.execute(q, &[]).map(|_| ()).unwrap();

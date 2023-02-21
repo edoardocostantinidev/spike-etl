@@ -53,7 +53,7 @@ impl EventHandler {
 
         self.reconciliation_engine
             .reconcile(event.clone())
-            .map_err(|err| EventError::ReconcilationEngineError(err))?;
+            .map_err(|err| EventError::ReconcilationEngineError(err.to_string()))?;
 
         Ok(())
     }

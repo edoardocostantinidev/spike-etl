@@ -58,6 +58,8 @@ mod tests {
 
         assert!(handler_result.is_ok());
 
+        client.query(r"SELECT * from relations", &[]).unwrap();
+
         let s = client
             .query(r"SELECT SUM(amount) from total_ordered", &[])
             .unwrap();
